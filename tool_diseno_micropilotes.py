@@ -11,6 +11,7 @@ from dataclasses import dataclass
 st.set_page_config(page_title="Diseño Micropilotes FHWA", layout="wide")
 
 def get_dywidag_db():
+    """Base de datos de sistemas de barras huecas y sólidas."""
     data = {
         "Sistema": [
             "R32-280", "R32-320", "R32-360", "R38-500", "R51-800", 
@@ -24,7 +25,7 @@ def get_dywidag_db():
     return pd.DataFrame(data)
 
 # ==============================================================================
-# 2. MOTOR DE CÁLCULO
+# 2. MOTOR DE CÁLCULO (GEOTECNIA Y ESTRUCTURA)
 # ==============================================================================
 
 @dataclass
@@ -84,7 +85,7 @@ class MicropileCore:
         }
 
 def calc_winkler_lateral(L, D, EI, kh_ref, V_load, M_load):
-    """Método analítico de Winkler para piloto largo (beta)."""
+    """Método analítico de Winkler para pilotes (modelo de viga sobre fundación elástica)."""
     # Beta factor (Rigidez relativa suelo-pilote)
     beta = ((kh_ref * D) / (4 * EI))**0.25
     
@@ -93,7 +94,7 @@ def calc_winkler_lateral(L, D, EI, kh_ref, V_load, M_load):
     
     for z in z_nodes:
         bz = beta * z
-        if bz > 15: # Amortiguamiento rápido
+        if bz > 15: # Amortiguamiento numérico para profundidades grandes
             y_list.append(0); M_list.append(0); V_list.append(0)
             continue
             
@@ -122,7 +123,7 @@ def calc_winkler_lateral(L, D, EI, kh_ref, V_load, M_load):
     return z_nodes, np.array(y_list), np.array(M_list), np.array(V_list), beta
 
 # ==============================================================================
-# 3. INTERFAZ GRÁFICA
+# 3. INTERFAZ GRÁFICA STREAMLIT
 # ==============================================================================
 
 st.title("🛡️ Diseño de Micropilotes - FHWA NHI-05-039")
@@ -141,7 +142,7 @@ with st.sidebar:
     
     st.caption(f"**{sys_sel}**: fy={fy_bar} MPa, As={As_bar} mm²")
     
-    fc_grout = st.number_input("f'c Grout (MPa)", 20.0, 50.0, 30.0)
+    fc_grout = st.number_input("f'c Grout (MPa)", 20.0, 60.0, 30.0)
     
     st.divider()
     L_tot = st.number_input("Longitud Micropilote (m)", 1.0, 50.0, 12.0)
@@ -156,7 +157,7 @@ with st.sidebar:
     ])
     edited_soil = st.data_editor(default_soil, num_rows="dynamic")
     
-    # Crear objetos de capa
+    # Crear objetos de capa para el cálculo
     layers_objs = []
     for _, r in edited_soil.iterrows():
         layers_objs.append(SoilLayer(r['z_top'], r['z_bot'], r['tipo'], r['alpha_bond'], r['kh_kN_m3']))
@@ -180,11 +181,14 @@ with tab1:
         res_geo = mp_core.calc_axial_capacity()
         
         # --- CÁLCULO ESTRUCTURAL (Solo Barra + Grout) ---
+        # Áreas
         A_grout_m2 = (np.pi * (D_perf/2)**2) - (As_bar * 1e-6)
         
+        # Compresión (FHWA)
         P_c_all = (0.40 * (fc_grout * 1000) * A_grout_m2) + \
                   (0.47 * (fy_bar * 1000) * (As_bar * 1e-6))
                   
+        # Tensión (FHWA)
         P_t_all = 0.55 * (fy_bar * 1000) * (As_bar * 1e-6)
         
         st.markdown("### Resultados Generales")
@@ -219,7 +223,7 @@ with tab1:
             ax_est.text(3.5, l.z_top + h/2, f"{l.tipo}\n$\\alpha$={l.alpha_bond}", 
                         ha='center', va='center', fontsize=7, rotation=90)
             
-        # 2. DIBUJAR MICROPILOTE (NUEVO REQUERIMIENTO)
+        # 2. DIBUJAR MICROPILOTE (VISUALIZACIÓN)
         center_x = 2.0
         width_micro = 0.4 # Escala visual
         
@@ -242,6 +246,7 @@ with tab1:
     
     fig_depth, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5), sharey=True)
     
+    # Gráfica Alpha Bond
     ax1.step(res_geo['alpha'], res_geo['z'], where='post', color='brown', linewidth=2)
     ax1.set_title(r"Adherencia Unit. ($\alpha_{bond}$)")
     ax1.set_xlabel("Alpha Bond (kPa)")
@@ -249,6 +254,7 @@ with tab1:
     ax1.grid(True, linestyle='--', alpha=0.5)
     ax1.invert_yaxis()
     
+    # Gráfica Capacidad
     ax2.plot(res_geo['Q_adm_profile'], res_geo['z'], 'b-', label='Q admisible')
     ax2.plot(res_geo['Q_ult_profile'], res_geo['z'], 'k--', label='Q última', alpha=0.5)
     if P_actuante > 0:
@@ -290,7 +296,7 @@ with tab2:
 
     st.divider()
     
-    # --- CÁLCULO DE PROPIEDADES ---
+    # --- CÁLCULO DE PROPIEDADES DE SECCIÓN ---
     # 1. Inercias
     I_bar = (np.pi * (row_sys['D_ext_bar_mm']/1000)**4) / 64
     I_grout_tot = (np.pi * D_perf**4) / 64
@@ -301,10 +307,11 @@ with tab2:
     
     EI_eff = (E_steel * I_bar) + (E_grout * I_grout_net)
     
-    # Aporte Casing
+    # 2. Casing (si aplica)
     EI_casing = 0
     Mn_casing = 0
     Vn_casing = 0
+    Z_cas = 0
     
     if usar_casing:
         D_ext_m = D_cas_ext / 1000
@@ -316,21 +323,23 @@ with tab2:
         EI_casing = E_steel * I_cas
         EI_eff += EI_casing
         
-        # Resistencia (Plástica)
+        # Resistencia Momento (Plástica - Z)
         Z_cas = (D_ext_m**3 - D_int_m**3) / 6
         Mn_casing = Z_cas * (fy_cas * 1000) # kNm
         
-        # Cortante Tubo (AISC: 0.6 Fy Ag/2 shear lag simplificado)
+        # Cortante Tubo (AISC: 0.6 Fy Ag/2 por shear lag)
         Ag_cas = (np.pi/4)*(D_ext_m**2 - D_int_m**2)
         Vn_casing = 0.6 * (fy_cas * 1000) * (Ag_cas * 0.5) # kN
     
-    # Resistencia Barra
+    # 3. Resistencia Barra
     d_bar_eq = np.sqrt(4 * As_bar / np.pi) / 1000 
+    # Módulo Plástico Barra Redonda Sólida
     Z_bar = (d_bar_eq**3) / 6
+    
     Mn_bar = Z_bar * (fy_bar * 1000) # kNm
     Vn_bar = 0.6 * (fy_bar * 1000) * (As_bar * 1e-6) # kN
     
-    # Totales Resistentes (LRFD phi=0.9 aprox para flexión, 0.75-0.9 cortante)
+    # Totales Resistentes (LRFD phi=0.9 aprox)
     phi_f = 0.9
     phi_v = 0.9
     
@@ -346,18 +355,32 @@ with tab2:
     M_max = np.max(np.abs(M_lat))
     V_max = np.max(np.abs(V_lat_arr))
 
-    # --- 2. RESULTADOS COMPARATIVOS (TABLAS Y ECUACIONES) ---
+    # --- RESULTADOS COMPARATIVOS ---
     st.subheader("2. Verificación Estructural Detallada")
     
     col_check1, col_check2 = st.columns([1, 1])
     
-with col_check2:
+    with col_check1:
+        st.markdown("**Comparativa Actuante vs Resistente**")
+        
+        df_res = pd.DataFrame({
+            "Tipo": ["Momento (Flexión)", "Cortante (Shear)"],
+            "Actuante (u)": [f"{M_max:.2f} kNm", f"{V_max:.2f} kN"],
+            "Capacidad (phi*Rn)": [f"{Mn_total:.2f} kNm", f"{Vn_total:.2f} kN"],
+            "Ratio (DCR)": [M_max/Mn_total if Mn_total>0 else 99, V_max/Vn_total if Vn_total>0 else 99],
+            "Estado": ["✅ OK" if (M_max/Mn_total)<1 else "❌ FALLA", "✅ OK" if (V_max/Vn_total)<1 else "❌ FALLA"]
+        })
+        st.dataframe(df_res, hide_index=True)
+        
+        st.metric("Deflexión Máxima Calculada", f"{y_max_mm:.2f} mm")
+
+    with col_check2:
+        # --- BLOQUE DE DETALLE SOLICITADO ---
         st.markdown("### 📚 Memoria de Cálculo Detallada")
         
-        # --- SECCIÓN MOMENTO ---
+        # Flexión
         st.markdown("**1. Capacidad a Flexión ($M_n$)**")
         st.caption("Basado en AISC 360-16, Capítulo F (Flexure) - Secciones Circulares.")
-        
         st.markdown("El momento nominal se calcula usando el Módulo Plástico ($Z$) asumiendo sección compacta:")
         st.latex(r"M_n = M_p = F_y \cdot Z")
         
@@ -374,37 +397,25 @@ with col_check2:
             
         st.markdown("---")
         
-        # --- SECCIÓN CORTANTE ---
+        # Cortante
         st.markdown("**2. Capacidad a Cortante ($V_n$)**")
         st.caption("Basado en AISC 360-16, Capítulo G (Shear) - Ecuación G6-1.")
         
         st.markdown("La resistencia al corte nominal considera el área efectiva de corte:")
         st.latex(r"V_n = 0.6 F_y A_{w}")
         
-        st.markdown("*Para Tubería (Casing)*, AISC especifica usar la mitad del área bruta como área efectiva de corte ($A_w = A_g/2$) para tener en cuenta el 'Shear Lag' en secciones circulares:")
+        st.markdown("*Para Tubería (Casing)*, AISC especifica usar la mitad del área bruta como área efectiva de corte ($A_w = A_g/2$) para tener en cuenta el 'Shear Lag':")
         st.latex(r"V_{n,casing} = 0.6 F_{y,casing} \left( \frac{A_{g,casing}}{2} \right)")
         
         st.markdown("*Para Barra Sólida:*")
         st.latex(r"V_{n,bar} = 0.6 F_{y,bar} A_{bar}")
 
         st.markdown("---")
-        
-        # --- REFERENCIAS ---
         st.markdown("### 🔗 Referencias Normativas")
         st.markdown("""
-        * **FHWA NHI-05-039:** *Micropile Design and Construction Reference Manual*. Cap. 5 (Structural Design). [Ver PDF Oficial](https://www.fhwa.dot.gov/engineering/geotech/pubs/05039/05039.pdf)
-        * **AISC 360-16:** *Specification for Structural Steel Buildings*. Capítulos F (Flexión) y G (Cortante). [Ver Norma AISC](https://www.aisc.org/globalassets/aisc/publications/standards/a360-16-spec-and-commentary.pdf)
+        * **FHWA NHI-05-039:** *Micropile Design and Construction Reference Manual*. Cap. 5. [Ver PDF](https://www.fhwa.dot.gov/engineering/geotech/pubs/05039/05039.pdf)
+        * **AISC 360-16:** *Specification for Structural Steel Buildings*. Caps F & G. [Ver Norma](https://www.aisc.org/globalassets/aisc/publications/standards/a360-16-spec-and-commentary.pdf)
         """)
-
-    with col_check2:
-        st.markdown("**Ecuaciones de Capacidad Utilizadas**")
-        st.latex(r"M_n \approx Z_{bar} F_{y,bar} + Z_{casing} F_{y,casing}")
-        st.latex(r"V_n \approx 0.6 F_{y,bar} A_{bar} + 0.6 F_{y,casing} (0.5 A_{casing})")
-        st.caption("Notas: Se utiliza módulo plástico Z para momento. Factor de reducción de cortante (Shear Lag) de 0.5 para tubería.")
-        
-        st.markdown("**Ecuación de Deflexión (Winkler)**")
-        st.latex(r"EI_{eff} \frac{d^4y}{dz^4} + k_h D y = 0")
-        st.write(f"Rigidez Compuesta ($EI_{{eff}}$): **{EI_eff/1000:.1f} kN·m²**")
 
     st.markdown("---")
     st.subheader("3. Diagramas de Solicitaciones")
@@ -422,7 +433,6 @@ with col_check2:
     # Momento
     ax_mom.plot(M_lat, z_lat, 'g-', linewidth=2)
     ax_mom.set_title("Momento (kNm)")
-    # Líneas de capacidad
     ax_mom.axvline(Mn_total, color='r', ls='--', label='phi*Mn')
     ax_mom.axvline(-Mn_total, color='r', ls='--')
     ax_mom.grid(True, linestyle=':')
