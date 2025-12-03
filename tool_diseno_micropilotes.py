@@ -351,20 +351,50 @@ with tab2:
     
     col_check1, col_check2 = st.columns([1, 1])
     
-    with col_check1:
-        st.markdown("**Comparativa Actuante vs Resistente**")
+with col_check2:
+        st.markdown("### 📚 Memoria de Cálculo Detallada")
         
-        # Crear DataFrame para visualización limpia
-        df_res = pd.DataFrame({
-            "Tipo": ["Momento (Flexión)", "Cortante (Shear)"],
-            "Actuante (u)": [f"{M_max:.2f} kNm", f"{V_max:.2f} kN"],
-            "Capacidad (phi*Rn)": [f"{Mn_total:.2f} kNm", f"{Vn_total:.2f} kN"],
-            "Ratio (DCR)": [M_max/Mn_total if Mn_total>0 else 99, V_max/Vn_total if Vn_total>0 else 99],
-            "Estado": ["✅ OK" if (M_max/Mn_total)<1 else "❌ FALLA", "✅ OK" if (V_max/Vn_total)<1 else "❌ FALLA"]
-        })
-        st.dataframe(df_res, hide_index=True)
+        # --- SECCIÓN MOMENTO ---
+        st.markdown("**1. Capacidad a Flexión ($M_n$)**")
+        st.caption("Basado en AISC 360-16, Capítulo F (Flexure) - Secciones Circulares.")
         
-        st.metric("Deflexión Máxima Calculada", f"{y_max_mm:.2f} mm")
+        st.markdown("El momento nominal se calcula usando el Módulo Plástico ($Z$) asumiendo sección compacta:")
+        st.latex(r"M_n = M_p = F_y \cdot Z")
+        
+        st.markdown("**Cálculo de Módulos Plásticos ($Z$):**")
+        st.markdown("*Para la Barra Sólida (Round Bar):*")
+        st.latex(r"Z_{bar} = \frac{d_{bar}^3}{6}")
+        
+        if usar_casing:
+            st.markdown("*Para la Tubería (Round HSS/Pipe):*")
+            st.latex(r"Z_{casing} = \frac{D_{ext}^3 - D_{int}^3}{6}")
+            st.info(f"Valores calculados:\n- $Z_{{bar}}$: {Z_bar*1e6:.1f} mm³\n- $Z_{{casing}}$: {Z_cas*1e6:.1f} mm³")
+        else:
+            st.info(f"Valor calculado $Z_{{bar}}$: {Z_bar*1e6:.1f} mm³")
+            
+        st.markdown("---")
+        
+        # --- SECCIÓN CORTANTE ---
+        st.markdown("**2. Capacidad a Cortante ($V_n$)**")
+        st.caption("Basado en AISC 360-16, Capítulo G (Shear) - Ecuación G6-1.")
+        
+        st.markdown("La resistencia al corte nominal considera el área efectiva de corte:")
+        st.latex(r"V_n = 0.6 F_y A_{w}")
+        
+        st.markdown("*Para Tubería (Casing)*, AISC especifica usar la mitad del área bruta como área efectiva de corte ($A_w = A_g/2$) para tener en cuenta el 'Shear Lag' en secciones circulares:")
+        st.latex(r"V_{n,casing} = 0.6 F_{y,casing} \left( \frac{A_{g,casing}}{2} \right)")
+        
+        st.markdown("*Para Barra Sólida:*")
+        st.latex(r"V_{n,bar} = 0.6 F_{y,bar} A_{bar}")
+
+        st.markdown("---")
+        
+        # --- REFERENCIAS ---
+        st.markdown("### 🔗 Referencias Normativas")
+        st.markdown("""
+        * **FHWA NHI-05-039:** *Micropile Design and Construction Reference Manual*. Cap. 5 (Structural Design). [Ver PDF Oficial](https://www.fhwa.dot.gov/engineering/geotech/pubs/05039/05039.pdf)
+        * **AISC 360-16:** *Specification for Structural Steel Buildings*. Capítulos F (Flexión) y G (Cortante). [Ver Norma AISC](https://www.aisc.org/globalassets/aisc/publications/standards/a360-16-spec-and-commentary.pdf)
+        """)
 
     with col_check2:
         st.markdown("**Ecuaciones de Capacidad Utilizadas**")
@@ -473,3 +503,4 @@ with tab3:
         st.error(f"❌ FALLA Punzonamiento (Ratio: {ratio_punz:.2f})")
         
     st.latex(r"\phi V_c = 0.75 \cdot 0.33 \sqrt{f'_c} \cdot b_o \cdot d")
+
