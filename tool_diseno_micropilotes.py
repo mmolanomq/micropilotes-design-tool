@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import matplotlib.gridspec as gridspec
 from dataclasses import dataclass
 
 # ==============================================================================
@@ -94,7 +93,7 @@ def calc_winkler_lateral(L, D, EI, kh_ref, V_load, M_load):
     
     for z in z_nodes:
         bz = beta * z
-        if bz > 10: # Amortiguamiento rápido
+        if bz > 15: # Amortiguamiento rápido
             y_list.append(0); M_list.append(0); V_list.append(0)
             continue
             
@@ -107,7 +106,7 @@ def calc_winkler_lateral(L, D, EI, kh_ref, V_load, M_load):
         C = exp_beta * (cos_b - sin_b)
         D_fact = exp_beta * cos_b
         
-        # Deflexión (m) -> Convertir a cm/mm luego
+        # Deflexión (m)
         y = (2 * V_load * beta / (kh_ref * D)) * D_fact + (2 * M_load * beta**2 / (kh_ref * D)) * C
         
         # Momento (kN.m)
@@ -181,21 +180,16 @@ with tab1:
         res_geo = mp_core.calc_axial_capacity()
         
         # --- CÁLCULO ESTRUCTURAL (Solo Barra + Grout) ---
-        # FHWA NHI-05-039 Ec. 5-1 (Compresión) y 5-7 (Tensión)
-        # Convertir áreas a m2 y esfuerzos a kPa para cálculo en kN
         A_grout_m2 = (np.pi * (D_perf/2)**2) - (As_bar * 1e-6)
         
-        # P_comp_all = 0.40 f'c A_grout + 0.47 fy A_bar
         P_c_all = (0.40 * (fc_grout * 1000) * A_grout_m2) + \
                   (0.47 * (fy_bar * 1000) * (As_bar * 1e-6))
                   
-        # P_tens_all = 0.55 fy A_bar
         P_t_all = 0.55 * (fy_bar * 1000) * (As_bar * 1e-6)
         
         st.markdown("### Resultados Generales")
         m1, m2, m3 = st.columns(3)
         
-        # Semáforo de Geotecnia
         delta_geo = None
         if P_actuante > 0:
             delta_geo = "OK" if res_geo['Q_adm_total'] >= P_actuante else "FALLA"
@@ -203,33 +197,51 @@ with tab1:
         m1.metric("Q Admisible Geotécnico", f"{res_geo['Q_adm_total']:.2f} kN", delta=delta_geo)
         m2.metric("P Admisible Compresión", f"{P_c_all:.2f} kN", help="FHWA (Barra + Grout)")
         m3.metric("P Admisible Tensión", f"{P_t_all:.2f} kN", help="FHWA (Solo Barra)")
-        
-        st.info("Nota: En esta pestaña solo se considera la capacidad del micropilote armado (Barra + Grout). La tubería (Casing) se añade en la siguiente pestaña.")
 
     with col_g2:
-        # --- GRÁFICO DE ESTRATIGRAFÍA (PATCHES) ---
-        st.subheader("Perfil del Suelo")
+        # --- GRÁFICO DE ESTRATIGRAFÍA CON DIBUJO DE MICROPILOTE ---
+        st.subheader("Perfil del Suelo y Micropilote")
         fig_est, ax_est = plt.subplots(figsize=(4, 6))
         estilos = {"Arcilla": "#D2B48C", "Arena": "#F4A460", "Roca": "#808080"}
+        
+        # 1. Dibujar Capas
+        max_depth_plot = max(L_tot + 2, layers_objs[-1].z_bot)
         
         for l in layers_objs:
             h = l.z_bot - l.z_top
             color = estilos.get(l.tipo, "#D3D3D3")
-            rect = patches.Rectangle((0, l.z_top), 4, h, facecolor=color, edgecolor='k', alpha=0.6)
+            # Rectangulo del suelo
+            rect = patches.Rectangle((0, l.z_top), 4, h, facecolor=color, edgecolor='none', alpha=0.5)
             ax_est.add_patch(rect)
-            ax_est.text(2, l.z_top + h/2, f"{l.tipo}\n$\\alpha$={l.alpha_bond}", ha='center', va='center', fontsize=8)
+            # Lineas divisorias
+            ax_est.axhline(l.z_top, color='k', linewidth=0.5, alpha=0.3)
+            # Texto
+            ax_est.text(3.5, l.z_top + h/2, f"{l.tipo}\n$\\alpha$={l.alpha_bond}", 
+                        ha='center', va='center', fontsize=7, rotation=90)
             
-        ax_est.set_ylim(max(L_tot, layers_objs[-1].z_bot), 0)
-        ax_est.set_xlim(0, 4); ax_est.axis('off')
+        # 2. DIBUJAR MICROPILOTE (NUEVO REQUERIMIENTO)
+        center_x = 2.0
+        width_micro = 0.4 # Escala visual
+        
+        # Cuerpo Grout (Gris)
+        rect_micro = patches.Rectangle((center_x - width_micro/2, 0), width_micro, L_tot, 
+                                       facecolor='#708090', edgecolor='k', linewidth=1.5, label='Micropilote')
+        ax_est.add_patch(rect_micro)
+        
+        # Refuerzo Central (Rojo)
+        ax_est.plot([center_x, center_x], [0, L_tot], color='#8B0000', linestyle='--', linewidth=1.5, label='Barra Central')
+
+        ax_est.set_ylim(max_depth_plot, 0)
+        ax_est.set_xlim(0, 4)
+        ax_est.axis('off')
+        ax_est.legend(loc='lower left', fontsize=8)
         st.pyplot(fig_est)
 
     st.markdown("---")
     st.subheader("Gráficas de Profundidad")
     
-    # --- GRÁFICAS DE PROFUNDIDAD SOLICITADAS ---
     fig_depth, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5), sharey=True)
     
-    # Gráfica 1: Adherencia vs Profundidad
     ax1.step(res_geo['alpha'], res_geo['z'], where='post', color='brown', linewidth=2)
     ax1.set_title(r"Adherencia Unit. ($\alpha_{bond}$)")
     ax1.set_xlabel("Alpha Bond (kPa)")
@@ -237,10 +249,8 @@ with tab1:
     ax1.grid(True, linestyle='--', alpha=0.5)
     ax1.invert_yaxis()
     
-    # Gráfica 2: Capacidad vs Profundidad
     ax2.plot(res_geo['Q_adm_profile'], res_geo['z'], 'b-', label='Q admisible')
     ax2.plot(res_geo['Q_ult_profile'], res_geo['z'], 'k--', label='Q última', alpha=0.5)
-    # Línea de carga actuante
     if P_actuante > 0:
         ax2.axvline(P_actuante, color='r', linestyle=':', label='Carga Pu')
         
@@ -251,147 +261,153 @@ with tab1:
     
     st.pyplot(fig_depth)
     
-    # --- ECUACIONES PESTAÑA 1 ---
     with st.expander("Ver Ecuaciones y Referencias (FHWA NHI-05-039)"):
-        st.markdown("**1. Capacidad Geotécnica (Bond):**")
         st.latex(r"Q_{ult} = \sum (\alpha_{bond} \cdot \pi \cdot D_b \cdot \Delta L)")
         st.latex(r"Q_{all} = \frac{Q_{ult}}{FS}")
-        st.markdown("**2. Capacidad Estructural (Compresión - Servicio):**")
         st.latex(r"P_{c,all} = 0.40 f'_c A_{grout} + 0.47 f_y A_{bar}")
-        st.markdown("**3. Capacidad Estructural (Tensión - Servicio):**")
         st.latex(r"P_{t,all} = 0.55 f_y A_{bar}")
 
 # ==============================================================================
 # PESTAÑA 2: ANÁLISIS LATERAL Y TUBERÍA
 # ==============================================================================
 with tab2:
-    st.subheader("Configuración de Tubería y Cargas Laterales")
+    st.subheader("1. Configuración y Cargas")
     
     col_lat1, col_lat2 = st.columns(2)
     
     with col_lat1:
-        st.markdown("##### 1. Definición de Casing (Tubería)")
         usar_casing = st.checkbox("Incluir Tubería Permanente (Casing)", value=False)
-        
         D_cas_ext = 0; t_cas = 0; fy_cas = 0
         if usar_casing:
             c1, c2, c3 = st.columns(3)
-            D_cas_ext = c1.number_input("Ø Ext. Tubería (mm)", value=178.0)
-            t_cas = c2.number_input("Espesor Pared (mm)", value=12.7)
-            fy_cas = c3.number_input("Fy Tubería (MPa)", value=240.0)
-        else:
-            st.info("Sin tubería permanente considerada para rigidez o resistencia.")
+            D_cas_ext = c1.number_input("Ø Ext. (mm)", value=178.0)
+            t_cas = c2.number_input("Espesor (mm)", value=12.7)
+            fy_cas = c3.number_input("Fy Casing (MPa)", value=240.0)
 
     with col_lat2:
-        st.markdown("##### 2. Cargas Laterales")
-        V_lat = st.number_input("Carga Lateral (Shear) - kN", value=30.0)
-        M_top = st.number_input("Momento en Cabeza - kNm", value=10.0)
+        V_lat = st.number_input("Carga Lateral Actuante (Vu) - kN", value=30.0)
+        M_top = st.number_input("Momento Actuante (Mu) - kNm", value=10.0)
 
-    st.markdown("---")
+    st.divider()
     
-    # --- CÁLCULO DE RIGIDEZ (EI) PASO A PASO ---
-    st.subheader("Cálculo de Rigidez y Verificaciones")
-    
+    # --- CÁLCULO DE PROPIEDADES ---
     # 1. Inercias
     I_bar = (np.pi * (row_sys['D_ext_bar_mm']/1000)**4) / 64
-    
-    # Inercia Grout (Sin agrietar para EI_eff inicial, o reducido. FHWA sugiere simplificar)
-    # Asumimos Grout llena todo menos barra.
     I_grout_tot = (np.pi * D_perf**4) / 64
     I_grout_net = I_grout_tot - I_bar
     
-    # Módulos
-    E_steel = 200000 * 1000 # kPa
-    E_grout = 4700 * np.sqrt(fc_grout) * 1000 # kPa
+    E_steel = 200000 * 1000 
+    E_grout = 4700 * np.sqrt(fc_grout) * 1000 
     
     EI_eff = (E_steel * I_bar) + (E_grout * I_grout_net)
     
     # Aporte Casing
     EI_casing = 0
-    MRd_casing = 0
+    Mn_casing = 0
+    Vn_casing = 0
+    
     if usar_casing:
         D_ext_m = D_cas_ext / 1000
         t_m = t_cas / 1000
         D_int_m = D_ext_m - 2*t_m
         
+        # Rigidez
         I_cas = (np.pi * (D_ext_m**4 - D_int_m**4)) / 64
         EI_casing = E_steel * I_cas
         EI_eff += EI_casing
         
-        # Modulo plastico casing Z
+        # Resistencia (Plástica)
         Z_cas = (D_ext_m**3 - D_int_m**3) / 6
-        MRd_casing = Z_cas * (fy_cas * 1000) # kNm
+        Mn_casing = Z_cas * (fy_cas * 1000) # kNm
+        
+        # Cortante Tubo (AISC: 0.6 Fy Ag/2 shear lag simplificado)
+        Ag_cas = (np.pi/4)*(D_ext_m**2 - D_int_m**2)
+        Vn_casing = 0.6 * (fy_cas * 1000) * (Ag_cas * 0.5) # kN
     
-    # --- SOLUCIÓN WINKLER ---
-    # Tomamos kh promedio de la primera capa (crítica para lateral)
+    # Resistencia Barra
+    d_bar_eq = np.sqrt(4 * As_bar / np.pi) / 1000 
+    Z_bar = (d_bar_eq**3) / 6
+    Mn_bar = Z_bar * (fy_bar * 1000) # kNm
+    Vn_bar = 0.6 * (fy_bar * 1000) * (As_bar * 1e-6) # kN
+    
+    # Totales Resistentes (LRFD phi=0.9 aprox para flexión, 0.75-0.9 cortante)
+    phi_f = 0.9
+    phi_v = 0.9
+    
+    Mn_total = phi_f * (Mn_bar + Mn_casing)
+    Vn_total = phi_v * (Vn_bar + Vn_casing)
+
+    # --- CÁLCULO WINKLER ---
     kh_ref = layers_objs[0].kh
-    
     z_lat, y_lat, M_lat, V_lat_arr, beta = calc_winkler_lateral(L_tot, D_perf, EI_eff, kh_ref, V_lat, M_top)
     
-    # --- RESULTADOS LATERALES ---
-    col_res_lat1, col_res_lat2 = st.columns([1, 2])
-    
-    with col_res_lat1:
-        st.markdown("**Resultados Calculados:**")
-        st.write(f"- Rigidez $EI_{{eff}}$: **{EI_eff/1000:.1f} kN·m²**")
-        st.write(f"- Factor $\\beta$: **{beta:.3f} m⁻¹**")
-        
-        y_max_mm = np.max(np.abs(y_lat)) * 1000
-        M_max = np.max(np.abs(M_lat))
-        V_max = np.max(np.abs(V_lat_arr))
-        
-        st.metric("Deflexión Máxima", f"{y_max_mm:.2f} mm")
-        st.metric("Momento Máximo", f"{M_max:.2f} kNm")
-        
-        # Capacidad a Momento (Aproximada Plástica)
-        # Barra Z
-        d_bar_eq = np.sqrt(4 * As_bar / np.pi) / 1000 # m
-        Z_bar = (d_bar_eq**3) / 6
-        MRd_bar = Z_bar * (fy_bar * 1000) # kNm
-        
-        MRd_total = 0.9 * (MRd_bar + MRd_casing) # phi = 0.9 Flexión
-        
-        ratio_mom = M_max / MRd_total if MRd_total > 0 else 999
-        st.write(f"**Capacidad Momento ($M_{{Rd}}$):** {MRd_total:.1f} kNm")
-        
-        if ratio_mom < 1.0:
-            st.success(f"Cumple Flexión (Ratio: {ratio_mom:.2f})")
-        else:
-            st.error(f"Falla Flexión (Ratio: {ratio_mom:.2f})")
+    # Máximos
+    y_max_mm = np.max(np.abs(y_lat)) * 1000
+    M_max = np.max(np.abs(M_lat))
+    V_max = np.max(np.abs(V_lat_arr))
 
-    with col_res_lat2:
-        st.markdown("#### Diagramas de Solicitaciones")
-        # Graficamos Deflexión, Momento y Cortante
-        fig_lat, (ax_def, ax_mom, ax_shr) = plt.subplots(1, 3, figsize=(12, 5), sharey=True)
+    # --- 2. RESULTADOS COMPARATIVOS (TABLAS Y ECUACIONES) ---
+    st.subheader("2. Verificación Estructural Detallada")
+    
+    col_check1, col_check2 = st.columns([1, 1])
+    
+    with col_check1:
+        st.markdown("**Comparativa Actuante vs Resistente**")
         
-        # Deflexión
-        ax_def.plot(y_lat*1000, z_lat, 'm-')
-        ax_def.set_title("Deflexión (mm)")
-        ax_def.set_ylabel("Profundidad (m)")
-        ax_def.invert_yaxis()
-        ax_def.grid(True, alpha=0.4)
-        ax_def.axvline(0, color='k', linewidth=0.5)
+        # Crear DataFrame para visualización limpia
+        df_res = pd.DataFrame({
+            "Tipo": ["Momento (Flexión)", "Cortante (Shear)"],
+            "Actuante (u)": [f"{M_max:.2f} kNm", f"{V_max:.2f} kN"],
+            "Capacidad (phi*Rn)": [f"{Mn_total:.2f} kNm", f"{Vn_total:.2f} kN"],
+            "Ratio (DCR)": [M_max/Mn_total if Mn_total>0 else 99, V_max/Vn_total if Vn_total>0 else 99],
+            "Estado": ["✅ OK" if (M_max/Mn_total)<1 else "❌ FALLA", "✅ OK" if (V_max/Vn_total)<1 else "❌ FALLA"]
+        })
+        st.dataframe(df_res, hide_index=True)
         
-        # Momento
-        ax_mom.plot(M_lat, z_lat, 'g-')
-        ax_mom.set_title("Momento (kNm)")
-        ax_mom.axvline(MRd_total, color='r', ls='--', label='MRd')
-        ax_mom.axvline(-MRd_total, color='r', ls='--')
-        ax_mom.grid(True, alpha=0.4)
-        ax_mom.legend(fontsize=7)
+        st.metric("Deflexión Máxima Calculada", f"{y_max_mm:.2f} mm")
+
+    with col_check2:
+        st.markdown("**Ecuaciones de Capacidad Utilizadas**")
+        st.latex(r"M_n \approx Z_{bar} F_{y,bar} + Z_{casing} F_{y,casing}")
+        st.latex(r"V_n \approx 0.6 F_{y,bar} A_{bar} + 0.6 F_{y,casing} (0.5 A_{casing})")
+        st.caption("Notas: Se utiliza módulo plástico Z para momento. Factor de reducción de cortante (Shear Lag) de 0.5 para tubería.")
         
-        # Cortante (RECUPERADO)
-        ax_shr.plot(V_lat_arr, z_lat, 'b-')
-        ax_shr.set_title("Cortante (kN)")
-        ax_shr.axvline(0, color='k', linewidth=0.5)
-        ax_shr.grid(True, alpha=0.4)
-        
-        st.pyplot(fig_lat)
-        
-    with st.expander("Ver Ecuaciones de Cálculo Lateral (Winkler)"):
-        st.latex(r"EI_{eff} = E_{steel} I_{bar} + E_{grout} I_{grout} + E_{steel} I_{casing}")
-        st.latex(r"\beta = \sqrt[4]{\frac{k_h D}{4 EI_{eff}}}")
-        st.markdown("Las gráficas se generan usando la solución analítica de la ecuación diferencial de la viga sobre fundación elástica.")
+        st.markdown("**Ecuación de Deflexión (Winkler)**")
+        st.latex(r"EI_{eff} \frac{d^4y}{dz^4} + k_h D y = 0")
+        st.write(f"Rigidez Compuesta ($EI_{{eff}}$): **{EI_eff/1000:.1f} kN·m²**")
+
+    st.markdown("---")
+    st.subheader("3. Diagramas de Solicitaciones")
+    
+    fig_lat, (ax_def, ax_mom, ax_shr) = plt.subplots(1, 3, figsize=(12, 5), sharey=True)
+    
+    # Deflexión
+    ax_def.plot(y_lat*1000, z_lat, 'm-', linewidth=2)
+    ax_def.set_title("Deflexión (mm)")
+    ax_def.set_ylabel("Profundidad (m)")
+    ax_def.invert_yaxis()
+    ax_def.grid(True, linestyle=':')
+    ax_def.axvline(0, color='k', linewidth=0.5)
+    
+    # Momento
+    ax_mom.plot(M_lat, z_lat, 'g-', linewidth=2)
+    ax_mom.set_title("Momento (kNm)")
+    # Líneas de capacidad
+    ax_mom.axvline(Mn_total, color='r', ls='--', label='phi*Mn')
+    ax_mom.axvline(-Mn_total, color='r', ls='--')
+    ax_mom.grid(True, linestyle=':')
+    ax_mom.legend(fontsize=8, loc='lower right')
+    
+    # Cortante
+    ax_shr.plot(V_lat_arr, z_lat, 'b-', linewidth=2)
+    ax_shr.set_title("Cortante (kN)")
+    ax_shr.axvline(Vn_total, color='orange', ls='--', label='phi*Vn')
+    ax_shr.axvline(-Vn_total, color='orange', ls='--')
+    ax_shr.axvline(0, color='k', linewidth=0.5)
+    ax_shr.grid(True, linestyle=':')
+    ax_shr.legend(fontsize=8, loc='lower right')
+    
+    st.pyplot(fig_lat)
 
 # ==============================================================================
 # PESTAÑA 3: LOSA
@@ -438,15 +454,11 @@ with tab3:
     
     # Perimetro critico b0
     d_eff = h_losa - 0.075 # Recubrimiento
-    
-    # Diametro accion (Placa o Micropilote)
     D_accion = D_cas_ext/1000 if usar_casing else D_perf
     
     b0 = np.pi * (D_accion + d_eff)
     phi_v = 0.75
     
-    # Vc ACI 318 (Simplificado) -> 0.33 sqrt(fc) b0 d
-    # fc en MPa, b0,d en m -> Resultado en MN -> *1000 -> kN
     Vc = 0.33 * np.sqrt(fcl_losa) * b0 * d_eff * 1000
     phi_Vc = phi_v * Vc
     
