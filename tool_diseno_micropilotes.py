@@ -111,7 +111,7 @@ class MicropileCore:
         }
 
 def calc_winkler_lateral(L, D, EI, kh_ref, V_load, M_load):
-    # Cálculo analítico asumiendo EI constante en la zona activa (Casing)
+    # Cálculo analítico asumiendo EI constante en la zona activa
     beta = ((kh_ref * D) / (4 * EI))**0.25
     z_nodes = np.linspace(0, L, 200)
     y_list, M_list, V_list = [], [], []
@@ -238,11 +238,6 @@ with tab1:
     if P_actuante > 0: ax2.axvline(P_actuante, color='r', ls=':', label='Carga Pu')
     ax2.set_title("Capacidad Axial Acumulada"); ax2.legend(); ax2.grid(True, ls='--')
     st.pyplot(fig_depth)
-    
-    with st.expander("Ver Ecuaciones y Referencias (FHWA NHI-05-039)"):
-        st.latex(r"Q_{ult} = \sum (\alpha_{bond} \cdot \pi \cdot D_b \cdot \Delta L)")
-        st.latex(r"Q_{all} = \frac{Q_{ult}}{FS}")
-        st.latex(r"P_{c,all} = 0.40 f'_c A_{grout} + 0.47 f_y A_{bar}")
 
 # ==============================================================================
 # PESTAÑA 2: LATERAL (Casing Variable)
@@ -295,12 +290,12 @@ with tab2:
     z_lat, y_lat, M_lat, V_lat_arr, beta = calc_winkler_lateral(L_tot, D_perf, EI_eff, kh_ref, V_lat, M_top)
     
     # Verificación de Longitud Crítica vs Longitud Casing
-    L_critica = 4 / beta # Longitud donde se disipa la carga (aprox)
+    L_critica = 4 / beta 
     
     if usar_casing:
         st.info(f"**Análisis de Longitud Activa:**\n- Longitud Crítica ($4/\\beta$): {L_critica:.2f} m\n- Longitud Casing: {L_casing:.2f} m")
         if L_casing < L_critica:
-            st.warning("⚠️ **ATENCIÓN:** La longitud del casing es MENOR que la longitud crítica. Parte de la carga lateral se transfiere a la sección sin casing (menos rígida). El cálculo mostrado usa la rigidez del casing (optimista). Se recomienda extender el casing o realizar un análisis de elementos finitos.")
+            st.warning("⚠️ **ATENCIÓN:** La longitud del casing es MENOR que la longitud crítica. Parte de la carga lateral se transfiere a la sección sin casing. Se recomienda extender el casing o realizar un análisis más detallado.")
         else:
             st.success("✅ La longitud del casing cubre la zona crítica de flexión.")
 
@@ -341,7 +336,6 @@ with tab2:
     st.subheader("3. Diagramas de Solicitaciones")
     fig_lat, (ax_def, ax_mom, ax_shr) = plt.subplots(1, 3, figsize=(12, 5), sharey=True)
     
-    # Plot con linea de Casing
     ax_def.plot(y_lat*1000, z_lat, 'm-'); ax_def.set_title("Deflexión (mm)"); ax_def.invert_yaxis(); ax_def.grid(True, ls=':')
     if usar_casing: ax_def.axhline(L_casing, color='k', linestyle='--', label=f'Casing {L_casing}m'); ax_def.legend()
     
@@ -389,3 +383,27 @@ with tab3:
     if ratio < 1.0: st.success(f"✅ PASA (Ratio: {ratio:.2f})")
     else: st.error(f"❌ FALLA (Ratio: {ratio:.2f})")
     st.latex(r"\phi V_c = 0.75 \cdot 0.33 \sqrt{f'_c} \cdot b_o \cdot d")
+
+# ==============================================================================
+# FOOTER: REFERENCIAS
+# ==============================================================================
+st.markdown("---")
+st.header("📚 Referencias Bibliográficas y Normativa")
+st.markdown("""
+Esta herramienta de cálculo está basada en los siguientes códigos y manuales de referencia:
+
+1.  **FHWA NHI-05-039**: *Micropile Design and Construction Reference Manual*. Federal Highway Administration.
+    * [🔗 Ver Manual Oficial](https://www.fhwa.dot.gov/engineering/geotech/pubs/05039/)
+    * *Uso:* Ecuaciones de capacidad geotécnica (Bond Stress), factores de seguridad y verificaciones a compresión/tensión axial.
+
+2.  **AISC 360-16**: *Specification for Structural Steel Buildings*. American Institute of Steel Construction.
+    * [🔗 Ver Norma AISC](https://www.aisc.org/globalassets/aisc/publications/standards/a360-16-spec-and-commentary.pdf)
+    * *Uso:* Cálculo de capacidades nominales de la sección (Momento Plástico $M_n$ y Cortante $V_n$ con consideración de Shear Lag en tuberías).
+
+3.  **Catálogos Técnicos de Fabricantes (Dywidag / Ischebeck)**:
+    * Los valores de Área ($A_s$) y Esfuerzo de Fluencia ($F_y$) se han tomado de las fichas técnicas oficiales de sistemas de barra hueca (Hollow Bar).
+    * *Nota:* La nomenclatura (ej. R51-800) refiere a la carga de rotura en kN.
+
+4.  **ACI 318**: *Building Code Requirements for Structural Concrete*.
+    * *Uso:* Verificación simplificada de punzonamiento en la losa de cabezal.
+""")
