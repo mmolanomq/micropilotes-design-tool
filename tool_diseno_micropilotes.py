@@ -11,16 +11,54 @@ from dataclasses import dataclass
 st.set_page_config(page_title="Diseño Micropilotes FHWA", layout="wide")
 
 def get_dywidag_db():
-    """Base de datos de sistemas de barras huecas y sólidas."""
     data = {
         "Sistema": [
-            "R32-280", "R32-320", "R32-360", "R38-500", "R51-800", 
-            "R51-660", "T76-1300", "T76-1900", "GEWI 20", "GEWI 25", 
-            "GEWI 28", "GEWI 32", "GEWI 40", "GEWI 50", "Ischebeck 30/11", "Ischebeck 40/16"
+            # --- Serie R32 ---
+            "R32-210 (R32L)", "R32-280 (R32N)", "R32-320", "R32-360 (R32S)",
+            # --- Serie R38 ---
+            "R38-420", "R38-500 (R38N)", "R38-550",
+            # --- Serie R51 ---
+            "R51-550 (R51L)", "R51-660", "R51-800 (R51N)",
+            # --- Serie T76 ---
+            "T76-1200", "T76-1600", "T76-1900",
+            # --- Ischebeck Titan (Ref) ---
+            "Titan 30/11", "Titan 40/16", "Titan 52/26"
         ],
-        "fy_MPa": [610, 610, 610, 610, 610, 610, 610, 610, 610, 610, 610, 610, 610, 610, 610, 610],
-        "As_mm2": [260, 350, 430, 735, 1452, 1100, 1750, 3277, 314, 491, 616, 804, 1257, 1963, 532, 1250],
-        "D_ext_bar_mm": [32, 32, 32, 38, 51, 51, 76, 76, 20, 25, 28, 32, 40, 50, 30, 40]
+        # Diámetro Exterior (mm)
+        "D_ext_bar_mm": [
+            32, 32, 32, 32,      # R32
+            38, 38, 38,          # R38
+            51, 51, 51,          # R51
+            76, 76, 76,          # T76
+            30, 40, 52           # Titan
+        ],
+        # Área Efectiva (mm²) - Valores de Catálogo DSI
+        "As_mm2": [
+            340, 410, 470, 510,        # R32 (L, N, -, S)
+            660, 750, 800,             # R38
+            890, 970, 1150,            # R51 (L, -, N) -> R51-800 es 1150 mm2
+            1610, 1990, 2360,          # T76
+            532, 960, 1590             # Titan (Aprox)
+        ],
+        # Esfuerzo de Fluencia (MPa)
+        # Calculado aprox: Carga Fluencia / Area. 
+        # Ej: R51-800 -> Py=640kN / 1150mm2 = 556 MPa.
+        # Algunos aceros Ischebeck son S460 o S550+.
+        "fy_MPa": [
+            470, 535, 530, 550,   # R32
+            530, 533, 560,        # R38
+            505, 555, 556,        # R51 (R51-800 fy ≈ 556 MPa)
+            620, 600, 635,        # T76
+            540, 560, 580         # Titan
+        ],
+        # Carga Última (kN) - Referencia Visual
+        "P_ult_kN": [
+            210, 280, 320, 360,
+            420, 500, 550,
+            550, 660, 800,
+            1200, 1600, 1900,
+            260, 660, 925
+        ]
     }
     return pd.DataFrame(data)
 
@@ -513,5 +551,6 @@ with tab3:
         st.error(f"❌ FALLA Punzonamiento (Ratio: {ratio_punz:.2f})")
         
     st.latex(r"\phi V_c = 0.75 \cdot 0.33 \sqrt{f'_c} \cdot b_o \cdot d")
+
 
 
