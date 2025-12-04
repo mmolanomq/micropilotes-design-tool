@@ -139,13 +139,13 @@ def calc_winkler_lateral(L, D, EI, kh_ref, V_load, M_load):
         exp_beta = np.exp(-bz)
         sin_b, cos_b = np.sin(bz), np.cos(bz)
         
-        # Funciones de forma Winkler
+        # Funciones de forma Winkler (Shape Functions)
         A = exp_beta * (cos_b + sin_b)
         B = exp_beta * sin_b
         C = exp_beta * (cos_b - sin_b)
         D_fact = exp_beta * cos_b
         
-        # Deflexión (m)
+        # Deflexión (m) - Solución para Carga y Momento en cabeza
         y = (2 * V_load * beta / (kh_ref * D)) * D_fact + (2 * M_load * beta**2 / (kh_ref * D)) * C
         
         # Momento (kN.m)
@@ -413,46 +413,34 @@ with tab2:
         st.metric("Deflexión Máxima Calculada", f"{y_max_mm:.2f} mm")
 
     with col_check2:
-        # --- BLOQUE DE DETALLE SOLICITADO ---
+        # --- BLOQUE DE DETALLE Y ECUACIONES ---
         st.markdown("### 📚 Memoria de Cálculo Detallada")
         
-        # Flexión
-        st.markdown("**1. Capacidad a Flexión ($M_n$)**")
-        st.caption("Basado en AISC 360-16, Capítulo F (Flexure) - Secciones Circulares.")
-        st.markdown("El momento nominal se calcula usando el Módulo Plástico ($Z$) asumiendo sección compacta:")
-        st.latex(r"M_n = M_p = F_y \cdot Z")
+        # 1. Deflexiones (Winkler)
+        st.markdown("**1. Deflexión Lateral (Modelo Winkler)**")
+        st.caption("Solución analítica para viga larga sobre medio elástico ($L > 4/\lambda$).")
         
-        st.markdown("**Cálculo de Módulos Plásticos ($Z$):**")
-        st.markdown("*Para la Barra Sólida (Round Bar):*")
-        st.latex(r"Z_{bar} = \frac{d_{bar}^3}{6}")
+        st.markdown("Longitud Característica ($\lambda$ o $\beta$):")
+        st.latex(r"\beta = \sqrt[4]{\frac{k_h D}{4 EI_{eff}}}")
+        st.write(f"Valor calculado $\\beta$: **{beta:.3f} m⁻¹**")
         
-        if usar_casing:
-            st.markdown("*Para la Tubería (Round HSS/Pipe):*")
-            st.latex(r"Z_{casing} = \frac{D_{ext}^3 - D_{int}^3}{6}")
-            st.info(f"Valores calculados:\n- $Z_{{bar}}$: {Z_bar*1e6:.1f} mm³\n- $Z_{{casing}}$: {Z_cas*1e6:.1f} mm³")
-        else:
-            st.info(f"Valor calculado $Z_{{bar}}$: {Z_bar*1e6:.1f} mm³")
-            
+        st.markdown("Ecuación de Deflexión ($y(z)$):")
+        st.latex(r"y(z) = \frac{2 V_u \beta}{k_h D} D_{\beta z} + \frac{2 M_u \beta^2}{k_h D} C_{\beta z}")
+        st.caption("Donde $C_{\\beta z}$ y $D_{\\beta z}$ son funciones de forma trigonométricas ($e^{-\\beta z} \cos ...$)")
+        
         st.markdown("---")
         
-        # Cortante
-        st.markdown("**2. Capacidad a Cortante ($V_n$)**")
-        st.caption("Basado en AISC 360-16, Capítulo G (Shear) - Ecuación G6-1.")
-        
-        st.markdown("La resistencia al corte nominal considera el área efectiva de corte:")
-        st.latex(r"V_n = 0.6 F_y A_{w}")
-        
-        st.markdown("*Para Tubería (Casing)*, AISC especifica usar la mitad del área bruta como área efectiva de corte ($A_w = A_g/2$) para tener en cuenta el 'Shear Lag':")
-        st.latex(r"V_{n,casing} = 0.6 F_{y,casing} \left( \frac{A_{g,casing}}{2} \right)")
-        
-        st.markdown("*Para Barra Sólida:*")
-        st.latex(r"V_{n,bar} = 0.6 F_{y,bar} A_{bar}")
+        # 2. Resistencias
+        st.markdown("**2. Capacidades Resistentes (AISC 360-16)**")
+        st.latex(r"M_n = F_y \cdot Z \quad \text{(Plástico)}")
+        st.latex(r"V_n = 0.6 F_y \cdot A_{eff}")
+        st.caption("Nota: Para tubería (casing), $A_{eff} = A_g/2$ debido al shear lag.")
 
         st.markdown("---")
         st.markdown("### 🔗 Referencias Normativas")
         st.markdown("""
-        * **FHWA NHI-05-039:** *Micropile Design and Construction Reference Manual*. Cap. 5. [Ver PDF](https://www.fhwa.dot.gov/engineering/geotech/pubs/05039/05039.pdf)
-        * **AISC 360-16:** *Specification for Structural Steel Buildings*. Caps F & G. [Ver Norma](https://www.aisc.org/globalassets/aisc/publications/standards/a360-16-spec-and-commentary.pdf)
+        * **FHWA NHI-05-039:** *Micropile Design and Construction Reference Manual*. [Ver Manual (FHWA)](https://www.fhwa.dot.gov/engineering/geotech/pubs/05039/)
+        * **AISC 360-16:** *Specification for Structural Steel Buildings*. [Ver Norma (AISC)](https://www.aisc.org/globalassets/aisc/publications/standards/a360-16-spec-and-commentary.pdf)
         """)
 
     st.markdown("---")
@@ -551,6 +539,4 @@ with tab3:
         st.error(f"❌ FALLA Punzonamiento (Ratio: {ratio_punz:.2f})")
         
     st.latex(r"\phi V_c = 0.75 \cdot 0.33 \sqrt{f'_c} \cdot b_o \cdot d")
-
-
 
