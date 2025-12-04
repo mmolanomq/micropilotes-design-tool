@@ -6,7 +6,7 @@ import matplotlib.patches as patches
 from dataclasses import dataclass
 
 # ==============================================================================
-# 1. BASE DE DATOS DYWIDAG / ISCHEBECK (CORREGIDA Y VERIFICADA)
+# 1. BASE DE DATOS DYWIDAG / ISCHEBECK (CORREGIDA)
 # ==============================================================================
 st.set_page_config(page_title="Diseño Micropilotes FHWA", layout="wide")
 
@@ -42,7 +42,7 @@ def get_dywidag_db():
         "As_mm2": [
             340, 410, 470, 510,        
             660, 750, 800,             
-            890, 970, 1150, # R51-800 Area corregida
+            890, 970, 1150, 
             1610, 1990, 2360,          
             532, 960, 1590             
         ],
@@ -50,7 +50,7 @@ def get_dywidag_db():
         "fy_MPa": [
             470, 535, 530, 550,   
             530, 533, 560,        
-            505, 555, 556, # R51-800 Fy corregido
+            505, 555, 556, 
             620, 600, 635,        
             540, 560, 580         
         ]
@@ -111,6 +111,7 @@ class MicropileCore:
         }
 
 def calc_winkler_lateral(L, D, EI, kh_ref, V_load, M_load):
+    # Cálculo analítico asumiendo EI constante en la zona activa (Casing)
     beta = ((kh_ref * D) / (4 * EI))**0.25
     z_nodes = np.linspace(0, L, 200)
     y_list, M_list, V_list = [], [], []
@@ -149,7 +150,6 @@ st.title("🛡️ Diseño de Micropilotes - FHWA NHI-05-039")
 with st.sidebar:
     st.header("1. Materiales y Geometría")
     df_sys = get_dywidag_db()
-    # Seleccionar R51-800 por defecto (index 9) para probar
     sys_sel = st.selectbox("Sistema de Refuerzo:", df_sys['Sistema'], index=9)
     row_sys = df_sys[df_sys['Sistema'] == sys_sel].iloc[0]
     
@@ -179,7 +179,7 @@ with st.sidebar:
 tab1, tab2, tab3 = st.tabs(["🏗️ Capacidad Geotécnica & Axial", "📉 Análisis Lateral & Tubería", "🧱 Diseño de Losa"])
 
 # ==============================================================================
-# PESTAÑA 1
+# PESTAÑA 1: AXIAL
 # ==============================================================================
 with tab1:
     col_g1, col_g2 = st.columns([1, 1])
@@ -218,7 +218,6 @@ with tab1:
             ax_est.axhline(l.z_top, color='k', linewidth=0.5, alpha=0.3)
             ax_est.text(3.5, l.z_top + h/2, f"{l.tipo}\n$\\alpha$={l.alpha_bond}", ha='center', va='center', fontsize=7, rotation=90)
             
-        # Dibujo Micropilote
         center_x = 2.0; width_micro = 0.4
         rect_micro = patches.Rectangle((center_x - width_micro/2, 0), width_micro, L_tot, facecolor='#708090', edgecolor='k', linewidth=1.5)
         ax_est.add_patch(rect_micro)
@@ -246,19 +245,21 @@ with tab1:
         st.latex(r"P_{c,all} = 0.40 f'_c A_{grout} + 0.47 f_y A_{bar}")
 
 # ==============================================================================
-# PESTAÑA 2 (INCLUYE BASE DE DATOS CORREGIDA + ECUACIONES DETALLADAS)
+# PESTAÑA 2: LATERAL (Casing Variable)
 # ==============================================================================
 with tab2:
     st.subheader("1. Configuración y Cargas")
     col_lat1, col_lat2 = st.columns(2)
     with col_lat1:
         usar_casing = st.checkbox("Incluir Tubería Permanente (Casing)", value=False)
-        D_cas_ext = 0; t_cas = 0; fy_cas = 0
+        D_cas_ext = 0; t_cas = 0; fy_cas = 0; L_casing = 0
         if usar_casing:
-            c1, c2, c3 = st.columns(3)
+            c1, c2 = st.columns(2)
             D_cas_ext = c1.number_input("Ø Ext. (mm)", value=178.0)
             t_cas = c2.number_input("Espesor (mm)", value=12.7)
+            c3, c4 = st.columns(2)
             fy_cas = c3.number_input("Fy Casing (MPa)", value=240.0)
+            L_casing = c4.number_input("Longitud Casing (m)", value=3.0, min_value=0.5, max_value=L_tot, step=0.5)
     with col_lat2:
         V_lat = st.number_input("Carga Lateral Actuante (Vu) - kN", value=30.0)
         M_top = st.number_input("Momento Actuante (Mu) - kNm", value=10.0)
@@ -289,14 +290,24 @@ with tab2:
     Mn_total = 0.9 * (Mn_bar + Mn_casing)
     Vn_total = 0.9 * (Vn_bar + Vn_casing)
 
+    # Cálculo Winkler
     kh_ref = layers_objs[0].kh
     z_lat, y_lat, M_lat, V_lat_arr, beta = calc_winkler_lateral(L_tot, D_perf, EI_eff, kh_ref, V_lat, M_top)
     
+    # Verificación de Longitud Crítica vs Longitud Casing
+    L_critica = 4 / beta # Longitud donde se disipa la carga (aprox)
+    
+    if usar_casing:
+        st.info(f"**Análisis de Longitud Activa:**\n- Longitud Crítica ($4/\\beta$): {L_critica:.2f} m\n- Longitud Casing: {L_casing:.2f} m")
+        if L_casing < L_critica:
+            st.warning("⚠️ **ATENCIÓN:** La longitud del casing es MENOR que la longitud crítica. Parte de la carga lateral se transfiere a la sección sin casing (menos rígida). El cálculo mostrado usa la rigidez del casing (optimista). Se recomienda extender el casing o realizar un análisis de elementos finitos.")
+        else:
+            st.success("✅ La longitud del casing cubre la zona crítica de flexión.")
+
     y_max_mm = np.max(np.abs(y_lat)) * 1000
     M_max = np.max(np.abs(M_lat))
     V_max = np.max(np.abs(V_lat_arr))
 
-    # Resultados y Ecuaciones DETALLADAS
     st.subheader("2. Verificación Estructural Detallada")
     col_check1, col_check2 = st.columns([1, 1])
     
@@ -312,42 +323,38 @@ with tab2:
         st.metric("Deflexión Máxima Calculada", f"{y_max_mm:.2f} mm")
 
     with col_check2:
-        # --- BLOQUE DETALLADO RESTAURADO ---
         st.markdown("### 📚 Memoria de Cálculo Detallada")
         st.markdown("**1. Deflexión Lateral (Modelo Winkler)**")
         st.latex(r"\beta = \sqrt[4]{\frac{k_h D}{4 EI_{eff}}}")
         st.write(f"Valor calculado $\\beta$: **{beta:.3f} m⁻¹**")
         st.latex(r"y(z) = \frac{2 V_u \beta}{k_h D} D_{\beta z} + \frac{2 M_u \beta^2}{k_h D} C_{\beta z}")
         
-        st.markdown("---")
         st.markdown("**2. Capacidad a Flexión ($M_n$)**")
-        st.caption("Basado en AISC 360-16, Capítulo F.")
         st.latex(r"M_n = F_y \cdot Z \quad (Z = d^3/6)")
         
         st.markdown("**3. Capacidad a Cortante ($V_n$)**")
-        st.caption("Basado en AISC 360-16, Capítulo G.")
         st.latex(r"V_{n,bar} = 0.6 F_y A_{bar}")
-        st.markdown("Para Tubería (Shear Lag):")
-        st.latex(r"V_{n,casing} = 0.6 F_{y,casing} (0.5 A_{g,casing})")
-
-        st.markdown("---")
-        st.markdown("### 🔗 Referencias")
-        st.markdown("""
-        * **FHWA NHI-05-039:** [Manual Oficial](https://www.fhwa.dot.gov/engineering/geotech/pubs/05039/)
-        * **AISC 360-16:** [Norma Acero](https://www.aisc.org/globalassets/aisc/publications/standards/a360-16-spec-and-commentary.pdf)
-        """)
+        if usar_casing:
+            st.latex(r"V_{n,casing} = 0.6 F_{y,casing} (0.5 A_{g,casing})")
 
     st.markdown("---")
     st.subheader("3. Diagramas de Solicitaciones")
     fig_lat, (ax_def, ax_mom, ax_shr) = plt.subplots(1, 3, figsize=(12, 5), sharey=True)
     
+    # Plot con linea de Casing
     ax_def.plot(y_lat*1000, z_lat, 'm-'); ax_def.set_title("Deflexión (mm)"); ax_def.invert_yaxis(); ax_def.grid(True, ls=':')
+    if usar_casing: ax_def.axhline(L_casing, color='k', linestyle='--', label=f'Casing {L_casing}m'); ax_def.legend()
+    
     ax_mom.plot(M_lat, z_lat, 'g-'); ax_mom.set_title("Momento (kNm)"); ax_mom.axvline(Mn_total, c='r', ls='--'); ax_mom.grid(True, ls=':')
+    if usar_casing: ax_mom.axhline(L_casing, color='k', linestyle='--')
+    
     ax_shr.plot(V_lat_arr, z_lat, 'b-'); ax_shr.set_title("Cortante (kN)"); ax_shr.axvline(Vn_total, c='orange', ls='--'); ax_shr.grid(True, ls=':')
+    if usar_casing: ax_shr.axhline(L_casing, color='k', linestyle='--')
+    
     st.pyplot(fig_lat)
 
 # ==============================================================================
-# PESTAÑA 3
+# PESTAÑA 3: LOSA
 # ==============================================================================
 with tab3:
     st.subheader("Verificación de Losa de Cabezal")
